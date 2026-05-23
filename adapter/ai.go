@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/layer5io/meshery-adapter-library/meshes"
@@ -26,9 +27,6 @@ import (
 const (
 	// AIAssistantOperation is the shared operation key for read-only assistant requests.
 	AIAssistantOperation = "ai-assistant-query"
-
-	// AIAssistantCapability identifies adapters that support read-only AI assistant queries.
-	AIAssistantCapability = "ai-assistant"
 )
 
 // AIAssistantHandler is implemented by adapters that support read-only AI assistant queries.
@@ -78,17 +76,13 @@ type AIAssistantError struct {
 	Field   string `json:"field,omitempty"`
 }
 
-// NewAIAssistantOperation returns the standard custom operation advertised by AI-capable adapters.
+// NewAIAssistantOperation returns the standard custom operation for AI-capable adapters.
 func NewAIAssistantOperation() *Operation {
 	return &Operation{
 		Type:        int32(meshes.OpCategory_CUSTOM),
 		Description: "Read-only AI assistant query",
 		Versions:    NoneVersion,
 		Templates:   NoneTemplate,
-		AdditionalProperties: map[string]string{
-			"capability": AIAssistantCapability,
-			"mode":       "read-only",
-		},
 	}
 }
 
@@ -96,6 +90,12 @@ func NewAIAssistantOperation() *Operation {
 func (r AIAssistantRequest) Validate() error {
 	if strings.TrimSpace(r.UserIntent) == "" {
 		return errors.New("user_intent is required")
+	}
+	if err := validateRawJSON("current_design_context", r.CurrentDesignContext); err != nil {
+		return err
+	}
+	if err := validateRawJSON("additional_context_fields", r.AdditionalContextFields); err != nil {
+		return err
 	}
 	return nil
 }
@@ -120,6 +120,58 @@ func (r AIAssistantResponse) Validate() error {
 	}
 	if outputClasses > 1 {
 		return errors.New("assistant response must include only one output class")
+	}
+	if len(r.Recommendations) > 0 {
+		return validateRecommendations(r.Recommendations)
+	}
+	if len(r.Redirects) > 0 {
+		return validateRedirects(r.Redirects)
+	}
+	if len(r.Errors) > 0 {
+		return validateAssistantErrors(r.Errors)
+	}
+	return nil
+}
+
+func validateRawJSON(field string, raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if !json.Valid(raw) {
+		return fmt.Errorf("%s must contain valid JSON", field)
+	}
+	return nil
+}
+
+func validateRecommendations(recommendations []AIAssistantRecommendation) error {
+	for i, recommendation := range recommendations {
+		if strings.TrimSpace(recommendation.Title) == "" {
+			return fmt.Errorf("recommendations[%d].title is required", i)
+		}
+	}
+	return nil
+}
+
+func validateRedirects(redirects []AIAssistantRedirect) error {
+	for i, redirect := range redirects {
+		if strings.TrimSpace(redirect.Title) == "" {
+			return fmt.Errorf("redirects[%d].title is required", i)
+		}
+		if strings.TrimSpace(redirect.URL) == "" {
+			return fmt.Errorf("redirects[%d].url is required", i)
+		}
+	}
+	return nil
+}
+
+func validateAssistantErrors(assistantErrors []AIAssistantError) error {
+	for i, assistantError := range assistantErrors {
+		if strings.TrimSpace(assistantError.Code) == "" {
+			return fmt.Errorf("errors[%d].code is required", i)
+		}
+		if strings.TrimSpace(assistantError.Message) == "" {
+			return fmt.Errorf("errors[%d].message is required", i)
+		}
 	}
 	return nil
 }
