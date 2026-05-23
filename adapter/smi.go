@@ -236,29 +236,11 @@ func (test *SMITest) runConformanceTest(response *Response) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = cClient.Close() }()
 
-	timeout := 100
-	result := &conformance.Response{}
-	for timeout > 0 {
-		time.Sleep(1 * time.Second)
-		result, err = cClient.CClient.RunTest(context.TODO(), &conformance.Request{
-			Mesh: &smp.ServiceMesh{
-				Annotations: test.annotations,
-				Labels:      test.labels,
-				Type:        test.meshType,
-				Version:     test.meshVersion,
-			},
-		})
-		if err == nil {
-			break
-		} else if err != nil && !strings.Contains(err.Error(), "i/o timeout") {
-			return err
-		}
-		timeout--
-	}
-
-	if response.CasesPassed == "" || response.PassingPercentage == "" {
-		return ErrNoResponse
+	result, err := test.runWithRetry(cClient)
+	if err != nil {
+		return err
 	}
 
 	response.CasesPassed = result.Casespassed
@@ -292,10 +274,28 @@ func (test *SMITest) runConformanceTest(response *Response) error {
 
 	response.MoreDetails = details
 
-	err = cClient.Close()
-	if err != nil {
-		return err
-	}
-
 	return nil
+}
+
+func (test *SMITest) runWithRetry(cClient *conformance.ConformanceClient) (*conformance.Response, error) {
+	timeout := 100
+	for timeout > 0 {
+		time.Sleep(1 * time.Second)
+		result, err := cClient.CClient.RunTest(context.TODO(), &conformance.Request{
+			Mesh: &smp.ServiceMesh{
+				Annotations: test.annotations,
+				Labels:      test.labels,
+				Type:        test.meshType,
+				Version:     test.meshVersion,
+			},
+		})
+		if err == nil {
+			return result, nil
+		}
+		if !strings.Contains(err.Error(), "i/o timeout") {
+			return nil, err
+		}
+		timeout--
+	}
+	return nil, ErrNoResponse
 }

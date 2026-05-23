@@ -19,8 +19,8 @@ import "github.com/layer5io/meshery-adapter-library/meshes"
 func (h *Adapter) StreamErr(e *meshes.EventsResponse, err error) {
 	h.Log.Error(err)
 	e.EventType = 2
-	//Putting this under a go routine so that this function is never blocking. If this push is performed synchronously then the call will be blocking in case
-	//when the channel is full with no client to receive the events. This blocking may cause many operations to not return.
+	// Putting this under a go routine so that this function is never blocking. If this push is performed synchronously then the call will be blocking in case
+	// when the channel is full with no client to receive the events. This blocking may cause many operations to not return.
 	go func() {
 		h.EventStreamer.Publish(e)
 		h.Log.Info("Event stored and sent successfully")
@@ -30,8 +30,8 @@ func (h *Adapter) StreamErr(e *meshes.EventsResponse, err error) {
 func (h *Adapter) StreamInfo(e *meshes.EventsResponse) {
 	h.Log.Info("Sending event")
 	e.EventType = 0
-	//Putting this under a go routine so that this function is never blocking. If this push is performed synchronously then the call will be blocking in case
-	//when the channel is full with no client to receive the events. This blocking may cause many operations to not return.
+	// Putting this under a go routine so that this function is never blocking. If this push is performed synchronously then the call will be blocking in case
+	// when the channel is full with no client to receive the events. This blocking may cause many operations to not return.
 	go func() {
 		h.EventStreamer.Publish(e)
 		h.Log.Info("Event stored and sent successfully")

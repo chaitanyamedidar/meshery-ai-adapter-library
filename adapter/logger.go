@@ -34,7 +34,7 @@ func AddLogger(logger logger.Handler, h Handler) Handler {
 }
 
 func (s *adapterLogger) GetName() string {
-	if !(len(s.next.GetName()) > 1) {
+	if len(s.next.GetName()) <= 1 {
 		s.log.Error(ErrGetName)
 	}
 	return s.next.GetName()
