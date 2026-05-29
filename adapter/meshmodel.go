@@ -33,10 +33,10 @@ type MeshModelRegistrant struct {
 }
 
 // NewMeshModelRegistrant returns an instance of NewMeshModelRegistrant
-func NewMeshModelRegistrant(paths []MeshModelRegistrantDefinitionPath, HTTPRegistry string) *MeshModelRegistrant {
+func NewMeshModelRegistrant(paths []MeshModelRegistrantDefinitionPath, httpRegistry string) *MeshModelRegistrant {
 	return &MeshModelRegistrant{
 		Paths:        paths,
-		HTTPRegistry: HTTPRegistry,
+		HTTPRegistry: httpRegistry,
 	}
 }
 
@@ -50,58 +50,84 @@ func NewMeshModelRegistrant(paths []MeshModelRegistrantDefinitionPath, HTTPRegis
 // Register function is a blocking function
 func (or *MeshModelRegistrant) Register(ctxID string) error {
 	for _, dpath := range or.Paths {
-		var mrd registry.MeshModelRegistrantData
-		definition, err := os.Open(dpath.EntityDefintionPath)
-		if err != nil {
-			return ErrOpenOAMDefintionFile(err)
+		if dpath.Type != types.ComponentDefinition {
+			continue
 		}
-		mrd.Host = registry.Host{
-			Hostname: dpath.Host,
-			Port:     dpath.Port,
-			Metadata: ctxID,
-		}
-		mrd.EntityType = dpath.Type
-		switch dpath.Type {
-		case types.ComponentDefinition:
-			var cd v1alpha1.ComponentDefinition
-			if err := json.NewDecoder(definition).Decode(&cd); err != nil {
-				_ = definition.Close()
-				return ErrJSONMarshal(err)
-			}
-			_ = definition.Close()
-			enbyt, _ := json.Marshal(cd)
-			mrd.Entity = enbyt
-			// send request to the register
-			backoffOpt := backoff.NewExponentialBackOff()
-			backoffOpt.MaxElapsedTime = 10 * time.Minute
-			if err := backoff.Retry(func() error {
-				contentByt, err := json.Marshal(mrd)
-				if err != nil {
-					return backoff.Permanent(err)
-				}
-				content := bytes.NewReader(contentByt)
-
-				// host here is given by the application itself and is trustworthy hence,
-				// #nosec
-				resp, err := http.Post(or.HTTPRegistry, "application/json", content)
-				if err != nil {
-					return err
-				}
-				if resp.StatusCode != http.StatusCreated &&
-					resp.StatusCode != http.StatusOK &&
-					resp.StatusCode != http.StatusAccepted {
-					return fmt.Errorf(
-						"register process failed, host returned status: %s with status code %d",
-						resp.Status,
-						resp.StatusCode,
-					)
-				}
-				return nil
-			}, backoffOpt); err != nil {
-				return ErrOAMRetry(err)
-			}
+		if err := or.registerComponentDefinition(ctxID, dpath); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+func (or *MeshModelRegistrant) registerComponentDefinition(ctxID string, dpath MeshModelRegistrantDefinitionPath) error {
+	entity, err := readComponentDefinition(dpath.EntityDefintionPath)
+	if err != nil {
+		return err
+	}
+
+	mrd := registry.MeshModelRegistrantData{
+		Host: registry.Host{
+			Hostname: dpath.Host,
+			Port:     dpath.Port,
+			Metadata: ctxID,
+		},
+		EntityType: dpath.Type,
+		Entity:     entity,
+	}
+
+	backoffOpt := backoff.NewExponentialBackOff()
+	backoffOpt.MaxElapsedTime = 10 * time.Minute
+	if err := backoff.Retry(func() error {
+		return or.postRegistration(mrd)
+	}, backoffOpt); err != nil {
+		return ErrOAMRetry(err)
+	}
+
+	return nil
+}
+
+func readComponentDefinition(path string) ([]byte, error) {
+	definition, err := os.Open(path)
+	if err != nil {
+		return nil, ErrOpenOAMDefintionFile(err)
+	}
+	defer func() { _ = definition.Close() }()
+
+	var cd v1alpha1.ComponentDefinition
+	if err := json.NewDecoder(definition).Decode(&cd); err != nil {
+		return nil, ErrJSONMarshal(err)
+	}
+	enbyt, err := json.Marshal(cd)
+	if err != nil {
+		return nil, ErrJSONMarshal(err)
+	}
+	return enbyt, nil
+}
+
+func (or *MeshModelRegistrant) postRegistration(mrd registry.MeshModelRegistrantData) error {
+	contentByt, err := json.Marshal(mrd)
+	if err != nil {
+		return backoff.Permanent(err)
+	}
+
+	// host here is given by the application itself and is trustworthy hence,
+	// #nosec
+	resp, err := http.Post(or.HTTPRegistry, "application/json", bytes.NewReader(contentByt))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated &&
+		resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf(
+			"register process failed, host returned status: %s with status code %d",
+			resp.Status,
+			resp.StatusCode,
+		)
+	}
 	return nil
 }

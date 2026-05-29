@@ -44,22 +44,12 @@ type StaticCompConfig struct {
 func CreateComponents(scfg StaticCompConfig) error {
 	meshmodeldirName, _ := getLatestDirectory(scfg.MeshModelPath)
 	meshmodelDir := filepath.Join(scfg.MeshModelPath, scfg.DirName)
-	_, err := os.Stat(meshmodelDir)
-	if err != nil && os.IsNotExist(err) {
-		err = os.Mkdir(meshmodelDir, 0777)
-		if err != nil {
-			return ErrCreatingComponents(err)
-		}
+
+	if err := ensureDir(meshmodelDir); err != nil {
+		return ErrCreatingComponents(err)
 	}
-	var comp *manifests.Component
-	switch scfg.Method {
-	case Manifests:
-		comp, err = manifests.GetFromManifest(context.Background(), scfg.URL, manifests.SERVICE_MESH, scfg.Config)
-	case HelmCharts:
-		comp, err = manifests.GetFromHelm(context.Background(), scfg.URL, manifests.SERVICE_MESH, scfg.Config)
-	default:
-		return ErrCreatingComponents(errors.New("invalid generation method. Must be either Manifests or HelmCharts"))
-	}
+
+	comp, err := getComponent(scfg)
 	if err != nil {
 		return ErrCreatingComponents(err)
 	}
@@ -85,6 +75,29 @@ func CreateComponents(scfg StaticCompConfig) error {
 	}
 	return nil
 }
+
+func ensureDir(dir string) error {
+	_, err := os.Stat(dir)
+	if err == nil {
+		return nil
+	}
+	if os.IsNotExist(err) {
+		return os.Mkdir(dir, 0777)
+	}
+	return err
+}
+
+func getComponent(scfg StaticCompConfig) (*manifests.Component, error) {
+	switch scfg.Method {
+	case Manifests:
+		return manifests.GetFromManifest(context.Background(), scfg.URL, manifests.SERVICE_MESH, scfg.Config)
+	case HelmCharts:
+		return manifests.GetFromHelm(context.Background(), scfg.URL, manifests.SERVICE_MESH, scfg.Config)
+	default:
+		return nil, errors.New("invalid generation method. Must be either Manifests or HelmCharts")
+	}
+}
+
 func convertOAMtoMeshmodel(def []byte, schema string, isCore bool, meshmodelname string, mcfg MeshModelConfig) ([]byte, error) {
 	var oamdef v1alpha1.WorkloadDefinition
 	err := json.Unmarshal(def, &oamdef)
@@ -93,7 +106,7 @@ func convertOAMtoMeshmodel(def []byte, schema string, isCore bool, meshmodelname
 	}
 	var c meshmodel.ComponentDefinition
 	c.Metadata = make(map[string]interface{})
-	metaname := strings.Split(manifests.FormatToReadableString(oamdef.ObjectMeta.Name), ".")
+	metaname := strings.Split(manifests.FormatToReadableString(oamdef.Name), ".")
 	var displayname string
 	if len(metaname) > 0 {
 		displayname = metaname[0]
@@ -108,7 +121,7 @@ func convertOAMtoMeshmodel(def []byte, schema string, isCore bool, meshmodelname
 	c.Metadata = mcfg.Metadata
 	if isCore {
 		c.APIVersion = oamdef.APIVersion
-		c.Kind = oamdef.ObjectMeta.Name
+		c.Kind = oamdef.Name
 		c.Model.Version = oamdef.Spec.Metadata["version"]
 		c.Model.Name = meshmodelname
 	} else {
@@ -150,36 +163,63 @@ func copyCoreComponentsToNewVersion(fromDir string, toDir string, newVersion str
 		return err
 	}
 	for _, f := range files {
-		// core definition file or core schema file
-		if !strings.Contains(strings.TrimSuffix(f.Name(), ".json"), ".") || !strings.Contains(strings.TrimSuffix(f.Name(), ".meshery.layer5io.schema.json"), ".") {
-			fsource, err := os.Open(filepath.Join(fromDir, f.Name()))
-			if err != nil {
-				return err
-			}
-			defer fsource.Close()
-			content, err := io.ReadAll(fsource)
-			if err != nil {
-				return err
-			}
-			// only for definition files
-			if !strings.Contains(strings.TrimSuffix(f.Name(), ".json"), ".") {
-				if isMeshmodel {
-					content, err = modifyMeshmodelVersionInDefinition(content, newVersion)
-				} else {
-					content, err = modifyVersionInDefinition(content, newVersion)
-				}
-				if err != nil {
-					return err
-				}
-			}
-			err = writeToFile(filepath.Join(toDir, f.Name()), content, false)
-			if err != nil {
-				return err
-			}
+		if !isCoreDefinitionOrSchema(f.Name()) {
+			continue
+		}
+		if err := copyCoreComponentFile(fromDir, toDir, f.Name(), newVersion, isMeshmodel); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+func isCoreDefinitionOrSchema(name string) bool {
+	return !strings.Contains(strings.TrimSuffix(name, ".json"), ".") ||
+		!strings.Contains(strings.TrimSuffix(name, ".meshery.layer5io.schema.json"), ".")
+}
+
+func copyCoreComponentFile(fromDir string, toDir string, name string, newVersion string, isMeshmodel bool) error {
+	content, err := readFile(filepath.Join(fromDir, name))
+	if err != nil {
+		return err
+	}
+	if isCoreDefinition(name) {
+		content, err = modifyCoreDefinitionVersion(content, newVersion, isMeshmodel)
+		if err != nil {
+			return err
+		}
+	}
+	return writeToFile(filepath.Join(toDir, name), content, false)
+}
+
+func readFile(path string) ([]byte, error) {
+	fsource, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	content, readErr := io.ReadAll(fsource)
+	closeErr := fsource.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	return content, nil
+}
+
+func isCoreDefinition(name string) bool {
+	return !strings.Contains(strings.TrimSuffix(name, ".json"), ".")
+}
+
+func modifyCoreDefinitionVersion(content []byte, newVersion string, isMeshmodel bool) ([]byte, error) {
+	if isMeshmodel {
+		return modifyMeshmodelVersionInDefinition(content, newVersion)
+	}
+	return modifyVersionInDefinition(content, newVersion)
+}
+
 func modifyMeshmodelVersionInDefinition(old []byte, newversion string) (new []byte, err error) {
 	var def meshmodel.ComponentDefinition
 	err = json.Unmarshal(old, &def)
