@@ -141,9 +141,10 @@ func (s *Service) ComponentInfo(context.Context, *meshes.ComponentInfoRequest) (
 		return nil, err
 	}
 	return &meshes.ComponentInfoResponse{
-		Type:    s.Type,
-		Name:    s.Name,
-		Version: s.Version,
-		GitSha:  s.GitSHA,
+		Type:       s.Type,
+		Name:       s.Name,
+		Version:    s.Version,
+		GitSha:     s.GitSHA,
+		Properties: s.Properties,
 	}, nil
 }

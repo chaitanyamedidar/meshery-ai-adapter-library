@@ -30,6 +30,14 @@ would be in the top layer, L1, `adapter` in L2, and `config/provider`  in L3. Pa
 
 <div>&nbsp;</div>
 
+### AI capability metadata
+
+The current `meshes.SupportedOperation` response exposes only operation `key`, `value`, and `category`. Adapters that need richer AI capability discovery can publish metadata through `ComponentInfoResponse.Properties` using the `adapter.AICapabilityMetadataProperty` key.
+
+The metadata value is a JSON-encoded `adapter.AICapabilityMetadata` object. It is intended for framework-level discovery fields such as supported AI operations, response modes, privacy modes, context limits, provider names, and provider schema enforcement modes. Provider-specific clients, prompt assembly, context building, and AI adapter implementation logic should remain in the adapter implementation repository.
+
+For the read-only Kanvas AI Assistant, adapters can start from `adapter.NewReadOnlyAICapabilityMetadata()`, then add provider and context-limit details before calling `ToProperties()`.
+
 ## Join the  community!
 
 <a name="contributing"></a><a name="community"></a>

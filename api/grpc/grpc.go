@@ -36,13 +36,14 @@ import (
 
 // Service object holds all the information about the server parameters.
 type Service struct {
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Port      string    `json:"port"`
-	Version   string    `json:"version"`
-	GitSHA    string    `json:"gitsha"`
-	StartedAt time.Time `json:"startedat"`
-	TraceURL  string    `json:"traceurl"`
+	Name       string            `json:"name"`
+	Type       string            `json:"type"`
+	Port       string            `json:"port"`
+	Version    string            `json:"version"`
+	GitSHA     string            `json:"gitsha"`
+	StartedAt  time.Time         `json:"startedat"`
+	TraceURL   string            `json:"traceurl"`
+	Properties map[string]string `json:"properties"`
 
 	Handler       adapter.Handler
 	EventStreamer *events.EventStreamer
